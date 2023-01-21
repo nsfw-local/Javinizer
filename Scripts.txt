@@ -1,0 +1,3 @@
+PS D:\PC\Javinizer\Javinizer\src> Register-PSRepository -Name 'Local-PSGallery' -SourceLocation "D:\PC\Javinizer\Repository" -InstallationPolicy Trusted
+PS D:\PC\Javinizer\Javinizer\src> Publish-Module -Path .\Javinizer -Repository Local-PSGallery
+PS D:\PC\Javinizer\Javinizer\src> Install-Module Javinizer -Repository 'Local-PSGallery'
