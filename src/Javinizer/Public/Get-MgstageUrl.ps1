@@ -10,6 +10,7 @@ function Get-MgstageUrl {
 
     begin {
         $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+
         $cookie = New-Object System.Net.Cookie
         $cookie.Name = 'adc'
         $cookie.Value = '1'
@@ -33,18 +34,15 @@ function Get-MgstageUrl {
         }
 
         try {
-            $rawHtml = $webRequest.Content -split '<p class="tag">'
-
-            if ($rawHtml.Count -gt 1) {
-                $results = $rawHtml[1..($rawHtml.Count - 1)]
-                $resultObject = $results | ForEach-Object {
+            # FIX: MGStage changed HTML structure, no longer uses <p class="tag">
+            # Now parsing directly from product detail links
+            $resultObject = [regex]::Matches($webRequest.Content, '<a href="(/product/product_detail/([^/]+)/)"') |
+                ForEach-Object {
                     [PSCustomObject]@{
-                        Id    = (($_ -split '<a href="\/product\/product_detail\/')[1] -split '\/">')[0]
-                        Title = (($_ -split '<p class="title lineclamp">')[1] -split '<\/p>')[0]
-                        Url   = "https://www.mgstage.com" + (($_ -split '<a href="')[1] -split '\/">')[0]
+                        Id  = $_.Groups[2].Value
+                        Url = "https://www.mgstage.com" + $_.Groups[1].Value
                     }
-                }
-            }
+                } | Sort-Object Id -Unique
         } catch {
             # Do nothing
         }

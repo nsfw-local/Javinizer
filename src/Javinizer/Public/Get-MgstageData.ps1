@@ -7,6 +7,7 @@ function Get-MgstageData {
 
     begin {
         $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
+
         $cookie = New-Object System.Net.Cookie
         $cookie.Name = 'adc'
         $cookie.Value = '1'
@@ -24,10 +25,13 @@ function Get-MgstageData {
             Write-JVLog -Write:$script:JVLogWrite -LogPath $script:JVLogPath -WriteLevel $script:JVLogWriteLevel -Level Error -Message "[$($MyInvocation.MyCommand.Name)] Error [GET] on URL [$Url]: $PSItem" -Action 'Continue'
         }
 
+        # Cache Id to avoid calling Get-MgstageId twice
+        $movieId = Get-MgstageId -WebRequest $webRequest
+
         $movieDataObject = [PSCustomObject]@{
             Source        = 'mgstageja'
             Url           = $Url
-            Id            = Get-MgstageId -WebRequest $webRequest
+            Id            = $movieId
             Title         = Get-MgstageTitle -WebRequest $webRequest
             Description   = Get-MgstageDescription -WebRequest $webRequest
             ReleaseDate   = Get-MgstageReleaseDate -WebRequest $webRequest
@@ -37,7 +41,7 @@ function Get-MgstageData {
             Label         = Get-MgstageLabel -WebRequest $webRequest
             Series        = Get-MgstageSeries -WebRequest $webRequest
             Rating        = Get-MGstageRating -WebRequest $webRequest
-            Actress       = Get-MgstageActress -WebRequest $webRequest
+            Actress       = Get-MgstageActress -WebRequest $webRequest -Id $movieId
             Genre         = Get-MgstageGenre -WebRequest $webRequest
             CoverUrl      = Get-MgstageCoverUrl -WebRequest $webRequest
             ScreenshotUrl = Get-MgstageScreenshotUrl -WebRequest $webRequest

@@ -216,29 +216,95 @@ function Get-MgstageGenre {
 function Get-MgstageActress {
     param (
         [Parameter(Mandatory = $true, Position = 0, ValueFromPipeline = $true)]
-        [Object]$Webrequest
+        [Object]$Webrequest,
+
+        [Parameter(Mandatory = $false)]
+        [String]$Id = ''
     )
 
     process {
         $movieActressObject = @()
-        $movieActress = (((($Webrequest.Content -split '<th>出演：<\/th>')[1] -split '<\/td>')[0]) -replace '<td>' -replace '<\/a>' -replace '<a href="\/search\/csearch\.php\?actor\[\]=.*">') -split '\n' `
-        | ForEach-Object { ($_).Trim() } | Where-Object { $_ -ne '' }
 
-        foreach ($actress in $movieActress) {
-            # Match if the name contains Japanese characters
-            if ($actress -match '[\u3040-\u309f]|[\u30a0-\u30ff]|[\uff66-\uff9f]|[\u4e00-\u9faf]') {
-                $movieActressObject += [PSCustomObject]@{
-                    LastName     = $null
-                    FirstName    = $null
-                    JapaneseName = Convert-JVCleanString -String $actress
-                    ThumbUrl     = $null
+        if ($Id -ne '') {
+            try {
+                # Step 1: Search shiroutoname.com
+                $searchUrl = "https://shiroutoname.com/?s=$Id"
+                Write-JVLog -Write:$script:JVLogWrite -LogPath $script:JVLogPath -WriteLevel $script:JVLogWriteLevel -Level Debug -Message "[$Id] [$($MyInvocation.MyCommand.Name)] Fetching actress from [$searchUrl]"
+                $searchRequest = Invoke-WebRequest -Uri $searchUrl -Method Get -Verbose:$false
+
+                # Step 2: Restrict to FIRST article only to avoid false positives from related articles
+                $firstArticle = [regex]::Match($searchRequest.Content,
+                    '<article[^>]*class="flex[^"]*"[^>]*>(.*?)</article>',
+                    [System.Text.RegularExpressions.RegexOptions]::Singleline)
+
+                if ($firstArticle.Success) {
+                    $articleBlock = $firstArticle.Groups[1].Value
+
+                    # Get detaillink href to follow to detail page
+                    $detailHref = ([regex]::Match($articleBlock, '<a[^>]*class="detaillink"[^>]*href="([^"]+)"')).Groups[1].Value
+
+                    if ($detailHref) {
+                        # Step 3: Detail page has actress inside <blockquote class="details"> - no false positives
+                        Write-JVLog -Write:$script:JVLogWrite -LogPath $script:JVLogPath -WriteLevel $script:JVLogWriteLevel -Level Debug -Message "[$Id] [$($MyInvocation.MyCommand.Name)] Following detaillink [$detailHref]"
+                        $detailRequest = Invoke-WebRequest -Uri $detailHref -Method Get -Verbose:$false
+
+                        $detailsBlock = ([regex]::Match($detailRequest.Content,
+                            '<blockquote[^>]*class="[^"]*details[^"]*"[^>]*>(.*?)</blockquote>',
+                            [System.Text.RegularExpressions.RegexOptions]::Singleline)).Groups[1].Value
+
+                        $actressSource = $detailsBlock
+                    } else {
+                        # No detaillink - parse actress from first article directly
+                        $actressSource = $articleBlock
+                    }
+
+                    # Parse mlink (MGS links) only, skip purchase buttons via class="mlink tag sbuy"
+                    $actressMatches = [regex]::Matches($actressSource,
+                        '<a\s+[^>]*class="mlink"[^>]*>([^<]+)<')
+
+                    $actressNames = $actressMatches |
+                        ForEach-Object { $_.Groups[1].Value.Trim() } |
+                        Where-Object { $_ -ne '' -and $_ -notmatch '^[A-Za-z]+$' -or ($_ -match '[\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]') } |
+                        Where-Object { $_ -notmatch 'MGS|FANZA' } |
+                        Select-Object -Unique
+
+                    Write-JVLog -Write:$script:JVLogWrite -LogPath $script:JVLogPath -WriteLevel $script:JVLogWriteLevel -Level Debug -Message "[$Id] [$($MyInvocation.MyCommand.Name)] shiroutoname results: [$($actressNames -join ', ')]"
+
+                    foreach ($actressName in $actressNames) {
+                        $movieActressObject += [PSCustomObject]@{
+                            LastName     = $null
+                            FirstName    = $null
+                            JapaneseName = Convert-JVCleanString -String $actressName
+                            ThumbUrl     = $null
+                        }
+                    }
                 }
-            } else {
-                $movieActressObject += [PSCustomObject]@{
-                    LastName     = ($actress -split ' ')[1] -replace '\\', ''
-                    FirstName    = ($actress -split ' ')[0] -replace '\\', ''
-                    JapaneseName = $null
-                    ThumbUrl     = $null
+            } catch {
+                Write-JVLog -Write:$script:JVLogWrite -LogPath $script:JVLogPath -WriteLevel $script:JVLogWriteLevel -Level Warning -Message "[$Id] [$($MyInvocation.MyCommand.Name)] Error fetching from shiroutoname: $PSItem" -Action 'Continue'
+            }
+        }
+
+        # Fallback: parse actress directly from MGStage page
+        if ($movieActressObject.Count -eq 0) {
+            Write-JVLog -Write:$script:JVLogWrite -LogPath $script:JVLogPath -WriteLevel $script:JVLogWriteLevel -Level Debug -Message "[$Id] [$($MyInvocation.MyCommand.Name)] Falling back to MGStage actress parsing"
+            $movieActress = (((($Webrequest.Content -split '<th>出演：<\/th>')[1] -split '<\/td>')[0]) -replace '<td>' -replace '<\/a>' -replace '<a href="\/search\/csearch\.php\?actor\[\]=.*">') -split '\n' `
+            | ForEach-Object { ($_).Trim() } | Where-Object { $_ -ne '' }
+
+            foreach ($actress in $movieActress) {
+                if ($actress -match '[\u3040-\u309f]|[\u30a0-\u30ff]|[\uff66-\uff9f]|[\u4e00-\u9faf]') {
+                    $movieActressObject += [PSCustomObject]@{
+                        LastName     = $null
+                        FirstName    = $null
+                        JapaneseName = Convert-JVCleanString -String $actress
+                        ThumbUrl     = $null
+                    }
+                } else {
+                    $movieActressObject += [PSCustomObject]@{
+                        LastName     = ($actress -split ' ')[1] -replace '\\', ''
+                        FirstName    = ($actress -split ' ')[0] -replace '\\', ''
+                        JapaneseName = $null
+                        ThumbUrl     = $null
+                    }
                 }
             }
         }
